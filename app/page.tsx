@@ -77,12 +77,38 @@ type SessionResponse = {
 };
 
 const navigation = [
-  { href: "/", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/clients", label: "Clients", icon: Users },
-  { href: "/cases", label: "Cases", icon: FolderOpen },
-  { href: "/articles", label: "Legal Articles", icon: Scale },
-  { href: "/documents", label: "Documents", icon: FileText },
-  { href: "/users", label: "User Management", icon: Users },
+  {
+    href: "/",
+    label: "Dashboard",
+    icon: LayoutDashboard,
+  },
+  {
+    href: "/clients",
+    label: "Clients",
+    icon: Users,
+  },
+  {
+    href: "/cases",
+    label: "Cases",
+    icon: FolderOpen,
+  },
+  {
+    href: "/articles",
+    label: "Legal Articles",
+    icon: Scale,
+    permission: "articles",
+  },
+  {
+    href: "/documents",
+    label: "Documents",
+    icon: FileText,
+  },
+  {
+    href: "/users",
+    label: "User Management",
+    icon: Users,
+    permission: "users",
+  },
 ];
 
 const defaultStats: DashboardStats = {
@@ -98,103 +124,292 @@ const defaultLawyer: LawyerUser = {
   role: "Lawyer",
 };
 
+function canAccess(
+  role: string,
+  permission?: string
+) {
+  if (!permission) {
+    return true;
+  }
+
+  if (permission === "users") {
+    return role === "Manager";
+  }
+
+  if (permission === "articles") {
+    return (
+      role === "Manager" ||
+      role === "Lawyer"
+    );
+  }
+
+  return false;
+}
+
+function getNavigationForRole(role: string) {
+  return navigation.filter((item) =>
+    canAccess(role, item.permission)
+  );
+}
+
 export default function Home() {
   const router = useRouter();
 
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [searchTerm, setSearchTerm] = useState("");
+  const [mobileMenuOpen, setMobileMenuOpen] =
+    useState(false);
 
-  const [clients, setClients] = useState<Client[]>([]);
-  const [cases, setCases] = useState<CaseItem[]>([]);
-  const [articles, setArticles] = useState<LegalArticle[]>([]);
-  const [documents, setDocuments] = useState<LegalDocument[]>([]);
+  const [searchOpen, setSearchOpen] =
+    useState(false);
 
-  const [stats, setStats] = useState<DashboardStats>(
-    defaultStats
-  );
+  const [searchTerm, setSearchTerm] =
+    useState("");
 
-  const [recentCases, setRecentCases] = useState<CaseItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const [userRole, setUserRole] =
+    useState("");
+
+  const [clients, setClients] =
+    useState<Client[]>([]);
+
+  const [cases, setCases] =
+    useState<CaseItem[]>([]);
+
+  const [articles, setArticles] =
+    useState<LegalArticle[]>([]);
+
+  const [documents, setDocuments] =
+    useState<LegalDocument[]>([]);
+
+  const [stats, setStats] =
+    useState<DashboardStats>(defaultStats);
+
+  const [recentCases, setRecentCases] =
+    useState<CaseItem[]>([]);
+
+  const [loading, setLoading] =
+    useState(true);
+
+  const [error, setError] =
+    useState("");
 
   const [lawyer, setLawyer] =
     useState<LawyerUser>(defaultLawyer);
 
   useEffect(() => {
-    loadDashboard();
-    loadLawyer();
+    initializeDashboard();
   }, []);
+
+  async function initializeDashboard() {
+    const authenticated =
+      await loadLawyer();
+
+    if (!authenticated) {
+      return;
+    }
+
+    await loadDashboard();
+  }
+
+  async function loadLawyer(): Promise<boolean> {
+    try {
+      const response = await fetch(
+        "/api/auth/session",
+        {
+          method: "GET",
+          cache: "no-store",
+        }
+      );
+
+      if (!response.ok) {
+        router.replace("/login");
+        return false;
+      }
+
+      const data: SessionResponse =
+        await response.json();
+
+      if (
+        !data.authenticated ||
+        !data.user
+      ) {
+        router.replace("/login");
+        return false;
+      }
+
+      const currentUser = {
+        name: data.user.name || "Lawyer",
+        email: data.user.email || "",
+        role: data.user.role || "Lawyer",
+      };
+
+      setLawyer(currentUser);
+      setUserRole(currentUser.role);
+
+      return true;
+    } catch (error) {
+      console.error(
+        "Session loading error:",
+        error
+      );
+
+      router.replace("/login");
+      return false;
+    }
+  }
 
   async function loadDashboard() {
     try {
       setLoading(true);
       setError("");
 
+      const sessionResponse = await fetch(
+        "/api/auth/session",
+        {
+          cache: "no-store",
+        }
+      );
+
+      if (!sessionResponse.ok) {
+        router.replace("/login");
+        return;
+      }
+
+      const sessionData: SessionResponse =
+        await sessionResponse.json();
+
+      if (
+        !sessionData.authenticated ||
+        !sessionData.user
+      ) {
+        router.replace("/login");
+        return;
+      }
+
+      const role =
+        sessionData.user.role || "Lawyer";
+
+      setUserRole(role);
+
+      const requests: Promise<Response>[] = [
+        fetch("/api/dashboard", {
+          cache: "no-store",
+        }),
+
+        fetch("/api/clients", {
+          cache: "no-store",
+        }),
+
+        fetch("/api/cases", {
+          cache: "no-store",
+        }),
+
+        fetch("/api/documents", {
+          cache: "no-store",
+        }),
+      ];
+
       const [
         dashboardResponse,
         clientsResponse,
         casesResponse,
-        articlesResponse,
         documentsResponse,
-      ] = await Promise.all([
-        fetch("/api/dashboard", {
-          cache: "no-store",
-        }),
-        fetch("/api/clients", {
-          cache: "no-store",
-        }),
-        fetch("/api/cases", {
-          cache: "no-store",
-        }),
-        fetch("/api/articles", {
-          cache: "no-store",
-        }),
-        fetch("/api/documents", {
-          cache: "no-store",
-        }),
-      ]);
+      ] = await Promise.all(requests);
+
+      let articlesResponse:
+        | Response
+        | null = null;
+
+      if (
+        role === "Manager" ||
+        role === "Lawyer"
+      ) {
+        articlesResponse = await fetch(
+          "/api/articles",
+          {
+            cache: "no-store",
+          }
+        );
+      }
 
       if (!dashboardResponse.ok) {
-        throw new Error("Failed to load dashboard.");
+        throw new Error(
+          "Failed to load dashboard."
+        );
       }
 
       if (!clientsResponse.ok) {
-        throw new Error("Failed to load clients.");
+        throw new Error(
+          "Failed to load clients."
+        );
       }
 
       if (!casesResponse.ok) {
-        throw new Error("Failed to load cases.");
-      }
-
-      if (!articlesResponse.ok) {
-        throw new Error("Failed to load legal articles.");
+        throw new Error(
+          "Failed to load cases."
+        );
       }
 
       if (!documentsResponse.ok) {
-        throw new Error("Failed to load documents.");
+        throw new Error(
+          "Failed to load documents."
+        );
+      }
+
+      if (
+        articlesResponse &&
+        !articlesResponse.ok
+      ) {
+        throw new Error(
+          "Failed to load legal articles."
+        );
       }
 
       const dashboardData: DashboardResponse =
         await dashboardResponse.json();
 
-      const clientsData = await clientsResponse.json();
-      const casesData = await casesResponse.json();
-      const articlesData = await articlesResponse.json();
-      const documentsData = await documentsResponse.json();
+      const clientsData =
+        await clientsResponse.json();
+
+      const casesData =
+        await casesResponse.json();
+
+      const documentsData =
+        await documentsResponse.json();
+
+      let articlesData: {
+        articles?: LegalArticle[];
+      } = {
+        articles: [],
+      };
+
+      if (articlesResponse) {
+        articlesData =
+          await articlesResponse.json();
+      }
 
       setStats(
-        dashboardData.stats || defaultStats
+        dashboardData.stats ||
+          defaultStats
       );
 
       setRecentCases(
         dashboardData.recentCases || []
       );
 
-      setClients(clientsData.clients || []);
-      setCases(casesData.cases || []);
-      setArticles(articlesData.articles || []);
-      setDocuments(documentsData.documents || []);
+      setClients(
+        clientsData.clients || []
+      );
+
+      setCases(
+        casesData.cases || []
+      );
+
+      setDocuments(
+        documentsData.documents || []
+      );
+
+      setArticles(
+        articlesData.articles || []
+      );
     } catch (err) {
       console.error(
         "Dashboard loading error:",
@@ -211,52 +426,14 @@ export default function Home() {
     }
   }
 
-  async function loadLawyer() {
-    try {
-      const response = await fetch(
-        "/api/auth/session",
-        {
-          method: "GET",
-          cache: "no-store",
-        }
-      );
-
-      if (!response.ok) {
-        router.replace("/login");
-        return;
-      }
-
-      const data: SessionResponse =
-        await response.json();
-
-      if (
-        !data.authenticated ||
-        !data.user
-      ) {
-        router.replace("/login");
-        return;
-      }
-
-      setLawyer({
-        name: data.user.name || "Lawyer",
-        email: data.user.email || "",
-        role: data.user.role || "Lawyer",
-      });
-    } catch (error) {
-      console.error(
-        "Session loading error:",
-        error
-      );
-
-      router.replace("/login");
-    }
-  }
-
   async function handleLogout() {
     try {
-      await fetch("/api/auth/logout", {
-        method: "POST",
-      });
+      await fetch(
+        "/api/auth/logout",
+        {
+          method: "POST",
+        }
+      );
     } catch (error) {
       console.error(
         "Logout error:",
@@ -269,9 +446,8 @@ export default function Home() {
   }
 
   const searchResults = useMemo(() => {
-    const query = searchTerm
-      .trim()
-      .toLowerCase();
+    const query =
+      searchTerm.trim().toLowerCase();
 
     if (!query) {
       return {
@@ -281,6 +457,10 @@ export default function Home() {
         documents: [],
       };
     }
+
+    const canSeeArticles =
+      userRole === "Manager" ||
+      userRole === "Lawyer";
 
     return {
       clients: clients
@@ -319,29 +499,31 @@ export default function Home() {
         )
         .slice(0, 5),
 
-      articles: articles
-        .filter(
-          (article) =>
-            article.articleNumber
-              .toLowerCase()
-              .includes(query) ||
-            article.title
-              .toLowerCase()
-              .includes(query) ||
-            article.lawName
-              .toLowerCase()
-              .includes(query) ||
-            article.jurisdiction
-              ?.toLowerCase()
-              .includes(query) ||
-            article.description
-              ?.toLowerCase()
-              .includes(query) ||
-            article.content
-              .toLowerCase()
-              .includes(query)
-        )
-        .slice(0, 5),
+      articles: canSeeArticles
+        ? articles
+            .filter(
+              (article) =>
+                article.articleNumber
+                  .toLowerCase()
+                  .includes(query) ||
+                article.title
+                  .toLowerCase()
+                  .includes(query) ||
+                article.lawName
+                  .toLowerCase()
+                  .includes(query) ||
+                article.jurisdiction
+                  ?.toLowerCase()
+                  .includes(query) ||
+                article.description
+                  ?.toLowerCase()
+                  .includes(query) ||
+                article.content
+                  .toLowerCase()
+                  .includes(query)
+            )
+            .slice(0, 5)
+        : [],
 
       documents: documents
         .filter(
@@ -361,6 +543,7 @@ export default function Home() {
     cases,
     articles,
     documents,
+    userRole,
   ]);
 
   const totalSearchResults =
@@ -421,7 +604,9 @@ export default function Home() {
               </div>
 
               <nav className="flex-1 space-y-2 p-4">
-                {navigation.map((item) => {
+                {getNavigationForRole(
+                  userRole
+                ).map((item) => {
                   const Icon = item.icon;
 
                   return (
@@ -680,39 +865,42 @@ export default function Home() {
                       </thead>
 
                       <tbody>
-                        {recentCases.map((item) => (
-                          <tr
-                            key={item.id}
-                            className="border-b last:border-0"
-                          >
-                            <td className="py-4 font-medium">
-                              {item.clientName ||
-                                "Unknown Client"}
-                            </td>
+                        {recentCases.map(
+                          (item) => (
+                            <tr
+                              key={item.id}
+                              className="border-b last:border-0"
+                            >
+                              <td className="py-4 font-medium">
+                                {item.clientName ||
+                                  "Unknown Client"}
+                              </td>
 
-                            <td className="py-4">
-                              <div>
-                                <p className="font-medium">
-                                  {item.title}
-                                </p>
+                              <td className="py-4">
+                                <div>
+                                  <p className="font-medium">
+                                    {item.title}
+                                  </p>
 
-                                <p className="mt-1 text-xs text-slate-400">
-                                  {item.caseNumber}
-                                </p>
-                              </div>
-                            </td>
+                                  <p className="mt-1 text-xs text-slate-400">
+                                    {item.caseNumber}
+                                  </p>
+                                </div>
+                              </td>
 
-                            <td className="py-4 text-slate-500">
-                              {item.category || "N/A"}
-                            </td>
+                              <td className="py-4 text-slate-500">
+                                {item.category ||
+                                  "N/A"}
+                              </td>
 
-                            <td className="py-4">
-                              <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium">
-                                {item.status}
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
+                              <td className="py-4">
+                                <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium">
+                                  {item.status}
+                                </span>
+                              </td>
+                            </tr>
+                          )
+                        )}
                       </tbody>
                     </table>
                   </div>
@@ -741,11 +929,14 @@ export default function Home() {
                     text="Create Case"
                   />
 
-                  <QuickAction
-                    href="/articles"
-                    icon={<Scale size={19} />}
-                    text="Find Legal Article"
-                  />
+                  {(userRole === "Manager" ||
+                    userRole === "Lawyer") && (
+                    <QuickAction
+                      href="/articles"
+                      icon={<Scale size={19} />}
+                      text="Find Legal Article"
+                    />
+                  )}
 
                   <QuickAction
                     href="/documents"
@@ -772,7 +963,9 @@ export default function Home() {
                 autoFocus
                 value={searchTerm}
                 onChange={(event) =>
-                  setSearchTerm(event.target.value)
+                  setSearchTerm(
+                    event.target.value
+                  )
                 }
                 placeholder="Search clients, cases, legal articles or documents..."
                 className="flex-1 bg-transparent text-sm outline-none"
@@ -823,7 +1016,9 @@ export default function Home() {
                 <div className="space-y-6">
                   <SearchGroup
                     title="Clients"
-                    count={searchResults.clients.length}
+                    count={
+                      searchResults.clients.length
+                    }
                     icon={<Users size={17} />}
                   >
                     {searchResults.clients.map(
@@ -853,7 +1048,9 @@ export default function Home() {
 
                   <SearchGroup
                     title="Cases"
-                    count={searchResults.cases.length}
+                    count={
+                      searchResults.cases.length
+                    }
                     icon={<FolderOpen size={17} />}
                   >
                     {searchResults.cases.map(
@@ -881,41 +1078,50 @@ export default function Home() {
                     )}
                   </SearchGroup>
 
-                  <SearchGroup
-                    title="Legal Articles"
-                    count={searchResults.articles.length}
-                    icon={<Scale size={17} />}
-                  >
-                    {searchResults.articles.map(
-                      (article) => (
-                        <Link
-                          key={article.id}
-                          href="/articles"
-                          onClick={() => {
-                            setSearchOpen(false);
-                            setSearchTerm("");
-                          }}
-                          className="block rounded-xl border p-4 hover:bg-slate-50"
-                        >
-                          <p className="font-semibold">
-                            {article.articleNumber} —{" "}
-                            {article.title}
-                          </p>
+                  {(userRole === "Manager" ||
+                    userRole === "Lawyer") && (
+                    <SearchGroup
+                      title="Legal Articles"
+                      count={
+                        searchResults.articles.length
+                      }
+                      icon={<Scale size={17} />}
+                    >
+                      {searchResults.articles.map(
+                        (article) => (
+                          <Link
+                            key={article.id}
+                            href="/articles"
+                            onClick={() => {
+                              setSearchOpen(false);
+                              setSearchTerm("");
+                            }}
+                            className="block rounded-xl border p-4 hover:bg-slate-50"
+                          >
+                            <p className="font-semibold">
+                              {
+                                article.articleNumber
+                              }{" "}
+                              — {article.title}
+                            </p>
 
-                          <p className="mt-1 text-sm text-slate-500">
-                            {article.lawName}
-                            {article.jurisdiction
-                              ? ` · ${article.jurisdiction}`
-                              : ""}
-                          </p>
-                        </Link>
-                      )
-                    )}
-                  </SearchGroup>
+                            <p className="mt-1 text-sm text-slate-500">
+                              {article.lawName}
+                              {article.jurisdiction
+                                ? ` · ${article.jurisdiction}`
+                                : ""}
+                            </p>
+                          </Link>
+                        )
+                      )}
+                    </SearchGroup>
+                  )}
 
                   <SearchGroup
                     title="Documents"
-                    count={searchResults.documents.length}
+                    count={
+                      searchResults.documents.length
+                    }
                     icon={<FileText size={17} />}
                   >
                     {searchResults.documents.map(
@@ -957,6 +1163,9 @@ function SidebarContent({
   lawyer: LawyerUser;
   onLogout: () => void | Promise<void>;
 }) {
+  const visibleNavigation =
+    getNavigationForRole(lawyer.role);
+
   return (
     <>
       <div className="flex h-20 items-center gap-3 border-b border-slate-800 px-6">
@@ -976,7 +1185,7 @@ function SidebarContent({
       </div>
 
       <nav className="flex-1 space-y-2 p-4">
-        {navigation.map((item) => {
+        {visibleNavigation.map((item) => {
           const Icon = item.icon;
 
           return (
@@ -1094,7 +1303,9 @@ function SearchGroup({
       <div className="mb-3 flex items-center gap-2">
         {icon}
 
-        <h3 className="font-bold">{title}</h3>
+        <h3 className="font-bold">
+          {title}
+        </h3>
 
         <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium">
           {count}

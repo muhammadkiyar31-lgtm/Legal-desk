@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { getSession } from "@/lib/auth";
+import { hasPermission } from "@/lib/permissions";
 
 type RouteContext = {
   params: Promise<{ id: string }>;
@@ -10,7 +12,36 @@ export async function GET(
   context: RouteContext
 ) {
   try {
+    const session = await getSession();
+
+    if (!hasPermission(session, "articles")) {
+      return NextResponse.json(
+        {
+          message:
+            "You do not have permission to access case articles.",
+        },
+        { status: 403 }
+      );
+    }
+
     const { id } = await context.params;
+
+    const caseCheck = await db.query(
+      `
+      SELECT id
+      FROM cases
+      WHERE id = $1
+      LIMIT 1
+      `,
+      [id]
+    );
+
+    if (caseCheck.rows.length === 0) {
+      return NextResponse.json(
+        { message: "Case not found." },
+        { status: 404 }
+      );
+    }
 
     const result = await db.query(
       `
@@ -39,7 +70,9 @@ export async function GET(
     console.error("GET case articles error:", error);
 
     return NextResponse.json(
-      { message: "Failed to load case articles." },
+      {
+        message: "Failed to load case articles.",
+      },
       { status: 500 }
     );
   }
@@ -50,22 +83,34 @@ export async function POST(
   context: RouteContext
 ) {
   try {
-    const { id } = await context.params;
-    const body = await request.json();
+    const session = await getSession();
 
-    const articleIds = Array.isArray(body.articleIds)
-      ? body.articleIds.map(String)
-      : [];
-
-    if (articleIds.length === 0) {
+    if (!hasPermission(session, "articles")) {
       return NextResponse.json(
-        { message: "At least one article is required." },
-        { status: 400 }
+        {
+          message:
+            "You do not have permission to manage case articles.",
+        },
+        { status: 403 }
       );
     }
 
+    const { id } = await context.params;
+    const body = await request.json();
+
+    const articleIds: string[] = Array.isArray(body.articleIds)
+  ? body.articleIds
+      .map((articleId: unknown) => String(articleId))
+      .map((articleId: string) => articleId.trim())
+      .filter((articleId: string) => Boolean(articleId))
+  : [];
     const caseCheck = await db.query(
-      "SELECT id FROM cases WHERE id = $1",
+      `
+      SELECT id
+      FROM cases
+      WHERE id = $1
+      LIMIT 1
+      `,
       [id]
     );
 
@@ -76,6 +121,27 @@ export async function POST(
       );
     }
 
+    if (articleIds.length > 0) {
+      const articlesCheck = await db.query(
+        `
+        SELECT id
+        FROM legal_articles
+        WHERE id = ANY($1::uuid[])
+        `,
+        [articleIds]
+      );
+
+      if (articlesCheck.rows.length !== articleIds.length) {
+        return NextResponse.json(
+          {
+            message:
+              "One or more selected legal articles were not found.",
+          },
+          { status: 404 }
+        );
+      }
+    }
+
     await db.query(
       `
       DELETE FROM case_articles
@@ -84,7 +150,7 @@ export async function POST(
       [id]
     );
 
-    for (const articleId of articleIds) {
+     for (const articleId of articleIds) {
       await db.query(
         `
         INSERT INTO case_articles (
@@ -125,7 +191,9 @@ export async function POST(
     console.error("POST case articles error:", error);
 
     return NextResponse.json(
-      { message: "Failed to save case articles." },
+      {
+        message: "Failed to save case articles.",
+      },
       { status: 500 }
     );
   }

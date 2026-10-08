@@ -24,6 +24,20 @@ type Client = {
   createdAt: string;
 };
 
+type RawApiClient = {
+  id?: unknown;
+  fullName?: unknown;
+  full_name?: unknown;
+  phone?: unknown;
+  email?: unknown;
+  address?: unknown;
+  idNumber?: unknown;
+  id_number?: unknown;
+  notes?: unknown;
+  createdAt?: unknown;
+  created_at?: unknown;
+};
+
 const emptyForm = {
   fullName: "",
   phone: "",
@@ -32,6 +46,94 @@ const emptyForm = {
   idNumber: "",
   notes: "",
 };
+
+function normalizeClient(
+  client: RawApiClient
+): Client | null {
+  if (!client || typeof client !== "object") {
+    return null;
+  }
+
+  if (
+    typeof client.id !== "string" ||
+    client.id.trim() === ""
+  ) {
+    return null;
+  }
+
+  const fullName =
+    typeof client.fullName === "string"
+      ? client.fullName
+      : typeof client.full_name === "string"
+        ? client.full_name
+        : "";
+
+  if (!fullName.trim()) {
+    return null;
+  }
+
+  const phone =
+    typeof client.phone === "string"
+      ? client.phone
+      : "";
+
+  const email =
+    typeof client.email === "string"
+      ? client.email
+      : "";
+
+  const address =
+    typeof client.address === "string"
+      ? client.address
+      : "";
+
+  const idNumber =
+    typeof client.idNumber === "string"
+      ? client.idNumber
+      : typeof client.id_number === "string"
+        ? client.id_number
+        : "";
+
+  const notes =
+    typeof client.notes === "string"
+      ? client.notes
+      : "";
+
+  const createdAt =
+    typeof client.createdAt === "string"
+      ? client.createdAt
+      : typeof client.created_at === "string"
+        ? client.created_at
+        : new Date().toISOString();
+
+  return {
+    id: client.id,
+    fullName,
+    phone,
+    email,
+    address,
+    idNumber,
+    notes,
+    createdAt,
+  };
+}
+
+function normalizeClients(
+  value: unknown
+): Client[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) =>
+      normalizeClient(item as RawApiClient)
+    )
+    .filter(
+      (client): client is Client =>
+        client !== null
+    );
+}
 
 export default function ClientsPage() {
   const [clients, setClients] = useState<Client[]>([]);
@@ -53,6 +155,7 @@ export default function ClientsPage() {
       setError("");
 
       const response = await fetch("/api/clients", {
+        method: "GET",
         cache: "no-store",
       });
 
@@ -64,8 +167,12 @@ export default function ClientsPage() {
         );
       }
 
-      setClients(data.clients || []);
+      setClients(
+        normalizeClients(data.clients)
+      );
     } catch (err) {
+      setClients([]);
+
       setError(
         err instanceof Error
           ? err.message
@@ -81,19 +188,34 @@ export default function ClientsPage() {
   }, []);
 
   const filteredClients = useMemo(() => {
-    const query = searchTerm.trim().toLowerCase();
+    const query = searchTerm
+      .trim()
+      .toLowerCase();
 
     if (!query) {
       return clients;
     }
 
-    return clients.filter(
-      (client) =>
-        client.fullName.toLowerCase().includes(query) ||
-        client.phone.toLowerCase().includes(query) ||
-        client.email.toLowerCase().includes(query) ||
-        client.idNumber.toLowerCase().includes(query)
-    );
+    return clients.filter((client) => {
+      if (!client) {
+        return false;
+      }
+
+      return (
+        client.fullName
+          .toLowerCase()
+          .includes(query) ||
+        client.phone
+          .toLowerCase()
+          .includes(query) ||
+        client.email
+          .toLowerCase()
+          .includes(query) ||
+        client.idNumber
+          .toLowerCase()
+          .includes(query)
+      );
+    });
   }, [clients, searchTerm]);
 
   function openCreateModal() {
@@ -105,6 +227,10 @@ export default function ClientsPage() {
   }
 
   function openEditModal(client: Client) {
+    if (!client) {
+      return;
+    }
+
     setEditingClient(client);
 
     setForm({
@@ -142,7 +268,9 @@ export default function ClientsPage() {
         ? `/api/clients/${editingClient.id}`
         : "/api/clients";
 
-      const method = editingClient ? "PUT" : "POST";
+      const method = editingClient
+        ? "PUT"
+        : "POST";
 
       const response = await fetch(url, {
         method,
@@ -158,28 +286,46 @@ export default function ClientsPage() {
         throw new Error(
           data.message ||
             `Failed to ${
-              editingClient ? "update" : "create"
+              editingClient
+                ? "update"
+                : "create"
             } client.`
         );
       }
 
+      const savedClient = normalizeClient(
+        data.client
+      );
+
       if (editingClient) {
-        setClients((current) =>
-          current.map((client) =>
-            client.id === editingClient.id
-              ? data.client
-              : client
-          )
+        if (savedClient) {
+          setClients((current) =>
+            current.map((client) =>
+              client.id === editingClient.id
+                ? savedClient
+                : client
+            )
+          );
+        } else {
+          await loadClients();
+        }
+
+        setSuccess(
+          "Client updated successfully."
         );
-
-        setSuccess("Client updated successfully.");
       } else {
-        setClients((current) => [
-          data.client,
-          ...current,
-        ]);
+        if (savedClient) {
+          setClients((current) => [
+            savedClient,
+            ...current,
+          ]);
+        } else {
+          await loadClients();
+        }
 
-        setSuccess("Client created successfully.");
+        setSuccess(
+          "Client created successfully."
+        );
       }
 
       setShowModal(false);
@@ -196,7 +342,13 @@ export default function ClientsPage() {
     }
   }
 
-  async function deleteClient(client: Client) {
+  async function deleteClient(
+    client: Client
+  ) {
+    if (!client) {
+      return;
+    }
+
     const confirmed = window.confirm(
       `Delete ${client.fullName}? This action cannot be undone.`
     );
@@ -220,15 +372,21 @@ export default function ClientsPage() {
 
       if (!response.ok) {
         throw new Error(
-          data.message || "Failed to delete client."
+          data.message ||
+            "Failed to delete client."
         );
       }
 
       setClients((current) =>
-        current.filter((item) => item.id !== client.id)
+        current.filter(
+          (item) =>
+            item && item.id !== client.id
+        )
       );
 
-      setSuccess("Client deleted successfully.");
+      setSuccess(
+        "Client deleted successfully."
+      );
     } catch (err) {
       setError(
         err instanceof Error
@@ -255,6 +413,7 @@ export default function ClientsPage() {
               <h1 className="text-2xl font-bold text-slate-950">
                 Clients
               </h1>
+
               <p className="text-sm text-slate-500">
                 Manage your legal clients.
               </p>
@@ -294,7 +453,9 @@ export default function ClientsPage() {
               type="text"
               value={searchTerm}
               onChange={(event) =>
-                setSearchTerm(event.target.value)
+                setSearchTerm(
+                  event.target.value
+                )
               }
               placeholder="Search clients by name, phone, email or ID..."
               className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-11 pr-4 text-sm outline-none focus:border-slate-900"
@@ -306,6 +467,7 @@ export default function ClientsPage() {
           <div className="border-b border-slate-200 px-5 py-4">
             <div className="flex items-center gap-2">
               <UserRound size={20} />
+
               <h2 className="font-semibold">
                 Client List
               </h2>
@@ -323,6 +485,7 @@ export default function ClientsPage() {
                   size={20}
                   className="animate-spin"
                 />
+
                 Loading clients...
               </div>
             </div>
@@ -353,18 +516,23 @@ export default function ClientsPage() {
                     <th className="px-5 py-4">
                       Client
                     </th>
+
                     <th className="px-5 py-4">
                       Phone
                     </th>
+
                     <th className="px-5 py-4">
                       Email
                     </th>
+
                     <th className="px-5 py-4">
                       ID Number
                     </th>
+
                     <th className="px-5 py-4">
                       Created
                     </th>
+
                     <th className="px-5 py-4 text-right">
                       Actions
                     </th>
@@ -372,68 +540,84 @@ export default function ClientsPage() {
                 </thead>
 
                 <tbody className="divide-y divide-slate-100">
-                  {filteredClients.map((client) => (
-                    <tr
-                      key={client.id}
-                      className="hover:bg-slate-50"
-                    >
-                      <td className="px-5 py-4">
-                        <div className="font-semibold text-slate-900">
-                          {client.fullName}
-                        </div>
+                  {filteredClients.map(
+                    (client) => {
+                      if (!client) {
+                        return null;
+                      }
 
-                        {client.address && (
-                          <div className="mt-1 max-w-xs truncate text-xs text-slate-500">
-                            {client.address}
-                          </div>
-                        )}
-                      </td>
+                      return (
+                        <tr
+                          key={client.id}
+                          className="hover:bg-slate-50"
+                        >
+                          <td className="px-5 py-4">
+                            <div className="font-semibold text-slate-900">
+                              {client.fullName}
+                            </div>
 
-                      <td className="px-5 py-4 text-sm text-slate-600">
-                        {client.phone || "—"}
-                      </td>
+                            {client.address && (
+                              <div className="mt-1 max-w-xs truncate text-xs text-slate-500">
+                                {client.address}
+                              </div>
+                            )}
+                          </td>
 
-                      <td className="px-5 py-4 text-sm text-slate-600">
-                        {client.email || "—"}
-                      </td>
+                          <td className="px-5 py-4 text-sm text-slate-600">
+                            {client.phone || "—"}
+                          </td>
 
-                      <td className="px-5 py-4 text-sm text-slate-600">
-                        {client.idNumber || "—"}
-                      </td>
+                          <td className="px-5 py-4 text-sm text-slate-600">
+                            {client.email || "—"}
+                          </td>
 
-                      <td className="px-5 py-4 text-sm text-slate-500">
-                        {new Date(
-                          client.createdAt
-                        ).toLocaleDateString()}
-                      </td>
+                          <td className="px-5 py-4 text-sm text-slate-600">
+                            {client.idNumber || "—"}
+                          </td>
 
-                      <td className="px-5 py-4">
-                        <div className="flex justify-end gap-2">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              openEditModal(client)
-                            }
-                            className="rounded-lg border border-slate-200 p-2 text-slate-600 hover:bg-slate-100"
-                            aria-label={`Edit ${client.fullName}`}
-                          >
-                            <Edit3 size={17} />
-                          </button>
+                          <td className="px-5 py-4 text-sm text-slate-500">
+                            {new Date(
+                              client.createdAt
+                            ).toLocaleDateString()}
+                          </td>
 
-                          <button
-                            type="button"
-                            onClick={() =>
-                              deleteClient(client)
-                            }
-                            className="rounded-lg border border-red-200 p-2 text-red-600 hover:bg-red-50"
-                            aria-label={`Delete ${client.fullName}`}
-                          >
-                            <Trash2 size={17} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                          <td className="px-5 py-4">
+                            <div className="flex justify-end gap-2">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  openEditModal(
+                                    client
+                                  )
+                                }
+                                className="rounded-lg border border-slate-200 p-2 text-slate-600 hover:bg-slate-100"
+                                aria-label={`Edit ${client.fullName}`}
+                              >
+                                <Edit3
+                                  size={17}
+                                />
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  deleteClient(
+                                    client
+                                  )
+                                }
+                                className="rounded-lg border border-red-200 p-2 text-red-600 hover:bg-red-50"
+                                aria-label={`Delete ${client.fullName}`}
+                              >
+                                <Trash2
+                                  size={17}
+                                />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    }
+                  )}
                 </tbody>
               </table>
             </div>
@@ -486,7 +670,8 @@ export default function ClientsPage() {
                     onChange={(event) =>
                       setForm({
                         ...form,
-                        fullName: event.target.value,
+                        fullName:
+                          event.target.value,
                       })
                     }
                     required
@@ -506,7 +691,8 @@ export default function ClientsPage() {
                     onChange={(event) =>
                       setForm({
                         ...form,
-                        phone: event.target.value,
+                        phone:
+                          event.target.value,
                       })
                     }
                     className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-slate-900"
@@ -525,7 +711,8 @@ export default function ClientsPage() {
                     onChange={(event) =>
                       setForm({
                         ...form,
-                        email: event.target.value,
+                        email:
+                          event.target.value,
                       })
                     }
                     className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-slate-900"
@@ -544,7 +731,8 @@ export default function ClientsPage() {
                     onChange={(event) =>
                       setForm({
                         ...form,
-                        idNumber: event.target.value,
+                        idNumber:
+                          event.target.value,
                       })
                     }
                     className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-slate-900"
@@ -563,7 +751,8 @@ export default function ClientsPage() {
                     onChange={(event) =>
                       setForm({
                         ...form,
-                        address: event.target.value,
+                        address:
+                          event.target.value,
                       })
                     }
                     className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-slate-900"
@@ -581,7 +770,8 @@ export default function ClientsPage() {
                     onChange={(event) =>
                       setForm({
                         ...form,
-                        notes: event.target.value,
+                        notes:
+                          event.target.value,
                       })
                     }
                     rows={4}

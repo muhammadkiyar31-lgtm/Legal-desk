@@ -1,16 +1,32 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { getSession } from "@/lib/auth";
+import { hasPermission } from "@/lib/permissions";
 
 type RouteContext = {
-  params: Promise<{ id: string }>;
+  params: Promise<{
+    id: string;
+  }>;
 };
 
 export async function PUT(
   request: Request,
-  context: RouteContext
+  { params }: RouteContext
 ) {
   try {
-    const { id } = await context.params;
+    const session = await getSession();
+
+    if (!hasPermission(session, "cases")) {
+      return NextResponse.json(
+        {
+          message:
+            "You do not have permission to update cases.",
+        },
+        { status: 403 }
+      );
+    }
+
+    const { id } = await params;
     const body = await request.json();
 
     const clientId = String(body.clientId || "").trim();
@@ -21,10 +37,32 @@ export async function PUT(
     const status = String(body.status || "Active").trim();
     const notes = String(body.notes || "").trim();
 
-    if (!clientId || !caseNumber || !title) {
+    if (!id || !clientId || !caseNumber || !title) {
       return NextResponse.json(
-        { message: "Client, case number and title are required." },
+        {
+          message:
+            "Case ID, client, case number and title are required.",
+        },
         { status: 400 }
+      );
+    }
+
+    const clientResult = await db.query(
+      `
+      SELECT id
+      FROM clients
+      WHERE id = $1
+      LIMIT 1
+      `,
+      [clientId]
+    );
+
+    if (clientResult.rows.length === 0) {
+      return NextResponse.json(
+        {
+          message: "Client not found.",
+        },
+        { status: 404 }
       );
     }
 
@@ -57,50 +95,78 @@ export async function PUT(
         clientId,
         caseNumber,
         title,
-        category,
-        description,
-        status,
-        notes,
+        category || null,
+        description || null,
+        status || "Active",
+        notes || null,
         id,
       ]
     );
 
     if (result.rows.length === 0) {
       return NextResponse.json(
-        { message: "Case not found." },
+        {
+          message: "Case not found.",
+        },
         { status: 404 }
       );
     }
 
-    return NextResponse.json({
-      success: true,
-      case: result.rows[0],
-    });
+    return NextResponse.json(result.rows[0]);
   } catch (error) {
     console.error("PUT case error:", error);
 
     return NextResponse.json(
-      { message: "Failed to update case." },
+      {
+        message: "Failed to update case.",
+      },
       { status: 500 }
     );
   }
 }
 
 export async function DELETE(
-  _request: Request,
-  context: RouteContext
+  request: Request,
+  { params }: RouteContext
 ) {
   try {
-    const { id } = await context.params;
+    const session = await getSession();
+
+    if (!hasPermission(session, "cases")) {
+      return NextResponse.json(
+        {
+          message:
+            "You do not have permission to delete cases.",
+        },
+        { status: 403 }
+      );
+    }
+
+    const { id } = await params;
+
+    if (!id) {
+      return NextResponse.json(
+        {
+          message: "Case ID is required.",
+        },
+        { status: 400 }
+      );
+    }
 
     const result = await db.query(
-      "DELETE FROM cases WHERE id = $1 RETURNING id",
+      `
+      DELETE FROM cases
+      WHERE id = $1
+      RETURNING id
+      `,
       [id]
     );
 
     if (result.rows.length === 0) {
       return NextResponse.json(
-        { message: "Case not found." },
+        {
+          message: "Case not found.",
+        },
         { status: 404 }
       );
     }
@@ -112,7 +178,9 @@ export async function DELETE(
     console.error("DELETE case error:", error);
 
     return NextResponse.json(
-      { message: "Failed to delete case." },
+      {
+        message: "Failed to delete case.",
+      },
       { status: 500 }
     );
   }

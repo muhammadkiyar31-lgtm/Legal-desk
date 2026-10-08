@@ -1,28 +1,48 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { getSession } from "@/lib/auth";
+import { hasPermission } from "@/lib/permissions";
 
 type RouteContext = {
-  params: Promise<{ id: string }>;
+  params: Promise<{
+    id: string;
+  }>;
 };
 
 export async function PUT(
   request: Request,
-  context: RouteContext
+  { params }: RouteContext
 ) {
   try {
-    const { id } = await context.params;
+    const session = await getSession();
+
+    if (!hasPermission(session, "clients")) {
+      return NextResponse.json(
+        {
+          message:
+            "You do not have permission to update clients.",
+        },
+        { status: 403 }
+      );
+    }
+
+    const { id } = await params;
     const body = await request.json();
 
     const fullName = String(body.fullName || "").trim();
     const phone = String(body.phone || "").trim();
-    const email = String(body.email || "").trim();
+    const email = String(body.email || "")
+      .trim()
+      .toLowerCase();
     const address = String(body.address || "").trim();
     const idNumber = String(body.idNumber || "").trim();
     const notes = String(body.notes || "").trim();
 
-    if (!fullName) {
+    if (!id || !fullName) {
       return NextResponse.json(
-        { message: "Full name is required." },
+        {
+          message: "Client ID and full name are required.",
+        },
         { status: 400 }
       );
     }
@@ -47,55 +67,84 @@ export async function PUT(
         address,
         id_number AS "idNumber",
         notes,
-        created_at AS "createdAt"
+        created_at AS "createdAt",
+        updated_at AS "updatedAt"
       `,
       [
         fullName,
-        phone,
-        email,
-        address,
-        idNumber,
-        notes,
+        phone || null,
+        email || null,
+        address || null,
+        idNumber || null,
+        notes || null,
         id,
       ]
     );
 
     if (result.rows.length === 0) {
       return NextResponse.json(
-        { message: "Client not found." },
+        {
+          message: "Client not found.",
+        },
         { status: 404 }
       );
     }
 
-    return NextResponse.json({
-      success: true,
-      client: result.rows[0],
-    });
+    return NextResponse.json(result.rows[0]);
   } catch (error) {
     console.error("PUT client error:", error);
 
     return NextResponse.json(
-      { message: "Failed to update client." },
+      {
+        message: "Failed to update client.",
+      },
       { status: 500 }
     );
   }
 }
 
 export async function DELETE(
-  _request: Request,
-  context: RouteContext
+  request: Request,
+  { params }: RouteContext
 ) {
   try {
-    const { id } = await context.params;
+    const session = await getSession();
+
+    if (!hasPermission(session, "clients")) {
+      return NextResponse.json(
+        {
+          message:
+            "You do not have permission to delete clients.",
+        },
+        { status: 403 }
+      );
+    }
+
+    const { id } = await params;
+
+    if (!id) {
+      return NextResponse.json(
+        {
+          message: "Client ID is required.",
+        },
+        { status: 400 }
+      );
+    }
 
     const result = await db.query(
-      "DELETE FROM clients WHERE id = $1 RETURNING id",
+      `
+      DELETE FROM clients
+      WHERE id = $1
+      RETURNING id
+      `,
       [id]
     );
 
     if (result.rows.length === 0) {
       return NextResponse.json(
-        { message: "Client not found." },
+        {
+          message: "Client not found.",
+        },
         { status: 404 }
       );
     }
@@ -107,7 +156,9 @@ export async function DELETE(
     console.error("DELETE client error:", error);
 
     return NextResponse.json(
-      { message: "Failed to delete client." },
+      {
+        message: "Failed to delete client.",
+      },
       { status: 500 }
     );
   }

@@ -14,23 +14,74 @@ import {
   X,
 } from "lucide-react";
 
+type UserRole = "Lawyer" | "Manager" | "Assistant";
+type UserStatus = "Active" | "Inactive";
+
 type User = {
   id: string;
   name: string;
   email: string;
-  role: "Lawyer" | "Manager" | "Assistant";
-  status: "Active" | "Inactive";
+  role: UserRole;
+  status: UserStatus;
   created_at: string;
 };
 
-type ApiUser = User;
+type RawApiUser = {
+  id?: unknown;
+  name?: unknown;
+  email?: unknown;
+  role?: unknown;
+  status?: unknown;
+  created_at?: unknown;
+  createdAt?: unknown;
+};
 
 const emptyForm = {
   name: "",
   email: "",
   password: "",
-  role: "Assistant" as User["role"],
+  role: "Assistant" as UserRole,
 };
+
+function normalizeUser(user: RawApiUser): User | null {
+  if (!user || typeof user !== "object") {
+    return null;
+  }
+
+  if (
+    typeof user.id !== "string" ||
+    typeof user.name !== "string" ||
+    typeof user.email !== "string"
+  ) {
+    return null;
+  }
+
+  const role: UserRole =
+    user.role === "Manager" ||
+    user.role === "Lawyer" ||
+    user.role === "Assistant"
+      ? user.role
+      : "Assistant";
+
+  const status: UserStatus =
+    user.status === "Inactive" ? "Inactive" : "Active";
+
+  const createdAt =
+    typeof user.created_at === "string"
+      ? user.created_at
+      : typeof user.createdAt === "string"
+        ? user.createdAt
+        : new Date().toISOString();
+
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role,
+    status,
+    created_at: createdAt,
+  };
+}
 
 export default function UsersPage() {
   const [users, setUsers] = useState<User[]>([]);
@@ -55,11 +106,23 @@ export default function UsersPage() {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.message || "Failed to load users.");
+        throw new Error(
+          data.message || "Failed to load users."
+        );
       }
 
-      setUsers(data.users || []);
+      const rawUsers: RawApiUser[] = Array.isArray(data.users)
+        ? data.users
+        : [];
+
+      const normalizedUsers = rawUsers
+        .map(normalizeUser)
+        .filter((user): user is User => user !== null);
+
+      setUsers(normalizedUsers);
     } catch (err) {
+      setUsers([]);
+
       setError(
         err instanceof Error
           ? err.message
@@ -113,7 +176,13 @@ export default function UsersPage() {
         );
       }
 
-      setUsers((current) => [data.user, ...current]);
+      const newUser = normalizeUser(data.user);
+
+      if (newUser) {
+        setUsers((current) => [newUser, ...current]);
+      } else {
+        await loadUsers();
+      }
 
       setForm(emptyForm);
       setShowModal(false);
@@ -130,7 +199,7 @@ export default function UsersPage() {
   }
 
   async function toggleStatus(user: User) {
-    const newStatus: User["status"] =
+    const newStatus: UserStatus =
       user.status === "Active" ? "Inactive" : "Active";
 
     setError("");
@@ -155,11 +224,17 @@ export default function UsersPage() {
         );
       }
 
-      setUsers((current) =>
-        current.map((item) =>
-          item.id === user.id ? data.user : item
-        )
-      );
+      const updatedUser = normalizeUser(data.user);
+
+      if (updatedUser) {
+        setUsers((current) =>
+          current.map((item) =>
+            item.id === user.id ? updatedUser : item
+          )
+        );
+      } else {
+        await loadUsers();
+      }
 
       setSuccess(
         `${user.name} is now ${newStatus.toLowerCase()}.`
@@ -199,7 +274,9 @@ export default function UsersPage() {
       }
 
       setUsers((current) =>
-        current.filter((item) => item.id !== user.id)
+        current.filter(
+          (item) => item && item.id !== user.id
+        )
       );
 
       setSuccess("User deleted successfully.");
@@ -213,11 +290,11 @@ export default function UsersPage() {
   }
 
   const activeUsers = users.filter(
-    (user) => user.status === "Active"
+    (user) => user?.status === "Active"
   ).length;
 
   const lawyers = users.filter(
-    (user) => user.role === "Lawyer"
+    (user) => user?.role === "Lawyer"
   ).length;
 
   return (
@@ -237,6 +314,7 @@ export default function UsersPage() {
               <h1 className="text-2xl font-bold text-slate-950">
                 User Management
               </h1>
+
               <p className="text-sm text-slate-500">
                 Manage lawyers, managers and assistants.
               </p>
@@ -288,7 +366,11 @@ export default function UsersPage() {
         <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
           <div className="border-b border-slate-200 px-5 py-4">
             <div className="flex items-center gap-2">
-              <ShieldCheck size={20} className="text-slate-700" />
+              <ShieldCheck
+                size={20}
+                className="text-slate-700"
+              />
+
               <h2 className="font-semibold text-slate-950">
                 System Users
               </h2>
@@ -302,6 +384,7 @@ export default function UsersPage() {
                   size={20}
                   className="animate-spin"
                 />
+
                 Loading users...
               </div>
             </div>
@@ -328,15 +411,19 @@ export default function UsersPage() {
                     <th className="px-5 py-4 font-semibold">
                       User
                     </th>
+
                     <th className="px-5 py-4 font-semibold">
                       Role
                     </th>
+
                     <th className="px-5 py-4 font-semibold">
                       Status
                     </th>
+
                     <th className="px-5 py-4 font-semibold">
                       Created
                     </th>
+
                     <th className="px-5 py-4 text-right font-semibold">
                       Actions
                     </th>
@@ -344,71 +431,78 @@ export default function UsersPage() {
                 </thead>
 
                 <tbody className="divide-y divide-slate-100">
-                  {users.map((user) => (
-                    <tr
-                      key={user.id}
-                      className="transition hover:bg-slate-50"
-                    >
-                      <td className="px-5 py-4">
-                        <div className="font-semibold text-slate-900">
-                          {user.name}
-                        </div>
-                        <div className="mt-1 text-sm text-slate-500">
-                          {user.email}
-                        </div>
-                      </td>
+                  {users.map((user) => {
+                    if (!user) {
+                      return null;
+                    }
 
-                      <td className="px-5 py-4">
-                        <span className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
-                          {user.role}
-                        </span>
-                      </td>
+                    return (
+                      <tr
+                        key={user.id}
+                        className="transition hover:bg-slate-50"
+                      >
+                        <td className="px-5 py-4">
+                          <div className="font-semibold text-slate-900">
+                            {user.name}
+                          </div>
 
-                      <td className="px-5 py-4">
-                        <span
-                          className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${
-                            user.status === "Active"
-                              ? "bg-emerald-100 text-emerald-700"
-                              : "bg-slate-200 text-slate-600"
-                          }`}
-                        >
-                          {user.status}
-                        </span>
-                      </td>
+                          <div className="mt-1 text-sm text-slate-500">
+                            {user.email}
+                          </div>
+                        </td>
 
-                      <td className="px-5 py-4 text-sm text-slate-500">
-                        {new Date(
-                          user.created_at
-                        ).toLocaleDateString()}
-                      </td>
+                        <td className="px-5 py-4">
+                          <span className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
+                            {user.role}
+                          </span>
+                        </td>
 
-                      <td className="px-5 py-4">
-                        <div className="flex justify-end gap-2">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              toggleStatus(user)
-                            }
-                            className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
+                        <td className="px-5 py-4">
+                          <span
+                            className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${
+                              user.status === "Active"
+                                ? "bg-emerald-100 text-emerald-700"
+                                : "bg-slate-200 text-slate-600"
+                            }`}
                           >
-                            {user.status === "Active"
-                              ? "Deactivate"
-                              : "Activate"}
-                          </button>
+                            {user.status}
+                          </span>
+                        </td>
 
-                          <button
-                            type="button"
-                            onClick={() =>
-                              deleteUser(user)
-                            }
-                            className="rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-600 transition hover:bg-red-50"
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                        <td className="px-5 py-4 text-sm text-slate-500">
+                          {new Date(
+                            user.created_at
+                          ).toLocaleDateString()}
+                        </td>
+
+                        <td className="px-5 py-4">
+                          <div className="flex justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                toggleStatus(user)
+                              }
+                              className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
+                            >
+                              {user.status === "Active"
+                                ? "Deactivate"
+                                : "Activate"}
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                deleteUser(user)
+                              }
+                              className="rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-600 transition hover:bg-red-50"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -419,6 +513,7 @@ export default function UsersPage() {
           <p className="text-sm font-semibold text-amber-900">
             Security note
           </p>
+
           <p className="mt-1 text-sm text-amber-800">
             User passwords are hashed with bcrypt before being
             stored in PostgreSQL. Passwords are never returned
@@ -435,6 +530,7 @@ export default function UsersPage() {
                 <h2 className="font-semibold text-slate-950">
                   Add User
                 </h2>
+
                 <p className="text-sm text-slate-500">
                   Create a new system account.
                 </p>
@@ -526,14 +622,16 @@ export default function UsersPage() {
                   onChange={(event) =>
                     setForm({
                       ...form,
-                      role: event.target.value as User["role"],
+                      role: event.target.value as UserRole,
                     })
                   }
                   className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 outline-none transition focus:border-slate-900"
                 >
                   <option value="Lawyer">Lawyer</option>
                   <option value="Manager">Manager</option>
-                  <option value="Assistant">Assistant</option>
+                  <option value="Assistant">
+                    Assistant
+                  </option>
                 </select>
               </div>
 
@@ -559,7 +657,9 @@ export default function UsersPage() {
                     />
                   )}
 
-                  {saving ? "Creating..." : "Create User"}
+                  {saving
+                    ? "Creating..."
+                    : "Create User"}
                 </button>
               </div>
             </form>
@@ -585,7 +685,9 @@ function StatCard({
         {icon}
       </div>
 
-      <p className="text-sm text-slate-500">{title}</p>
+      <p className="text-sm text-slate-500">
+        {title}
+      </p>
 
       <p className="mt-1 text-3xl font-bold text-slate-950">
         {value}
