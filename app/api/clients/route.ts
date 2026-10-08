@@ -1,0 +1,91 @@
+import { NextResponse } from "next/server";
+import { db } from "@/lib/db";
+
+export async function GET() {
+  try {
+    const result = await db.query(`
+      SELECT
+        id,
+        full_name AS "fullName",
+        phone,
+        email,
+        address,
+        id_number AS "idNumber",
+        notes,
+        created_at AS "createdAt"
+      FROM clients
+      ORDER BY created_at DESC
+    `);
+
+    return NextResponse.json({
+      success: true,
+      clients: result.rows,
+    });
+  } catch (error) {
+    console.error("GET clients error:", error);
+
+    return NextResponse.json(
+      { message: "Failed to load clients." },
+      { status: 500 }
+    );
+  }
+}
+
+export async function POST(request: Request) {
+  try {
+    const body = await request.json();
+
+    const fullName = String(body.fullName || "").trim();
+    const phone = String(body.phone || "").trim();
+    const email = String(body.email || "").trim();
+    const address = String(body.address || "").trim();
+    const idNumber = String(body.idNumber || "").trim();
+    const notes = String(body.notes || "").trim();
+
+    if (!fullName) {
+      return NextResponse.json(
+        { message: "Full name is required." },
+        { status: 400 }
+      );
+    }
+
+    const result = await db.query(
+      `
+      INSERT INTO clients (
+        full_name,
+        phone,
+        email,
+        address,
+        id_number,
+        notes
+      )
+      VALUES ($1, $2, $3, $4, $5, $6)
+      RETURNING
+        id,
+        full_name AS "fullName",
+        phone,
+        email,
+        address,
+        id_number AS "idNumber",
+        notes,
+        created_at AS "createdAt"
+      `,
+      [fullName, phone, email, address, idNumber, notes]
+    );
+
+    return NextResponse.json(
+      {
+        success: true,
+        client: result.rows[0],
+      },
+      { status: 201 }
+    );
+  } catch (error) {
+    console.error("POST clients error:", error);
+
+    return NextResponse.json(
+      { message: "Failed to create client." },
+      { status: 500 }
+    );
+  }
+}
